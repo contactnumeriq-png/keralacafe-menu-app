@@ -4,8 +4,53 @@ import os
 import qrcode
 from io import BytesIO
 import time
+import firebase_admin
+from firebase_admin import credentials, db
 
 st.set_page_config(page_title="Smart QR Menu", page_icon="🍔", layout="wide")
+
+# ==========================================
+# ഫയർബേസ് കണക്ഷൻ (Firebase Setup)
+# ==========================================
+# ഇവിടെ താങ്കളുടെ ഡാറ്റാബേസ് ലിങ്ക് നൽകുക (ഉദാ: "https://keralacafe-menu-1234.asia-southeast1.firebasedatabase.app/")
+DATABASE_URL = "https://keralacafe-menu-default-rtdb.asia-southeast1.firebasedatabase.app/" 
+
+if not firebase_admin._apps:
+    # നമ്മൾ ഫോൾഡറിൽ വെച്ച firebase_key.json ഫയൽ ഉപയോഗിക്കുന്നു
+    cred = credentials.Certificate("firebase_key.json")
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': DATABASE_URL
+    })
+
+# ഫയർബേസിൽ നിന്നും ഓർഡറുകൾ എടുക്കാനുള്ള ഫംഗ്ഷൻ
+def get_orders():
+    orders_ref = db.reference('orders')
+    data = orders_ref.get()
+    if data:
+        # ഫയർബേസിലെ ഡിക്ഷ്ണറിയെ ലിസ്റ്റ് ആക്കി മാറ്റുന്നു
+        return [val for key, val in data.items()]
+    return []
+
+# പുതിയ ഓർഡർ ഫയർബേസിലേക്ക് സേവ് ചെയ്യാനുള്ള ഫംഗ്ഷൻ
+def save_order(order_data):
+    orders_ref = db.reference('orders')
+    # ഓർഡർ ഐഡി വെച്ച് സേവ് ചെയ്യുന്നു
+    orders_ref.child(str(order_data['id'])).set(order_data)
+
+# ഓർഡർ സ്റ്റാറ്റസ് മാറ്റാൻ (കിച്ചണിൽ നിന്നും Accept ചെയ്യുമ്പോൾ)
+def update_order_status(order_id, status, end_time, manual_time):
+    order_ref = db.reference(f'orders/{order_id}')
+    order_ref.update({
+        'status': status,
+        'end_time': end_time,
+        'manual_time': manual_time
+    })
+
+# പേയ്മെന്റ് അപ്ഡേറ്റ് ചെയ്യാൻ
+def update_payment(order_id, payment_status):
+    order_ref = db.reference(f'orders/{order_id}')
+    order_ref.update({'payment': payment_status})
+
 
 MENU_FILE = "menu_data.json"
 
@@ -30,20 +75,18 @@ def save_menu(menu_data):
 menu_data = load_menu()
 
 if 'cart' not in st.session_state: st.session_state.cart = {} 
-if 'orders' not in st.session_state: st.session_state.orders = [] 
 if 'show_bill_page' not in st.session_state: st.session_state.show_bill_page = False
 if 'my_table' not in st.session_state: st.session_state.my_table = 1 
 
-# ==========================================
-# ആപ്പ് റൂട്ടിംഗ് (Customer വ്യൂവിൽ സൈഡ്ബാർ ഹൈഡ് ചെയ്യാൻ)
-# ==========================================
+# ഫയർബേസിൽ നിന്നും എപ്പോഴും പുതിയ ഓർഡറുകൾ എടുക്കുന്നു
+all_orders = get_orders()
+
 query_params = st.query_params
 role = query_params.get("role", "demo")
 
 if role == "customer":
     mode = "📱 കസ്റ്റമർ മെനു"
     st.session_state.my_table = int(query_params.get("table", 1))
-    # കസ്റ്റമർ വ്യൂവിൽ സൈഡ്ബാർ ഒളിപ്പിക്കാനുള്ള CSS കോഡ്
     st.markdown("""<style>[data-testid="stSidebar"] {display: none;} [data-testid="collapsedControl"] {display: none;}</style>""", unsafe_allow_html=True)
 else:
     st.sidebar.title("നിയന്ത്രണ പാനൽ (Demo Mode)")
@@ -57,7 +100,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
     if st.session_state.show_bill_page:
         st.title("💳 ബിൽ പേയ്മെന്റ്")
         my_table = st.session_state.my_table
-        my_unpaid_orders = [o for o in st.session_state.orders if o['table'] == my_table and o['payment'] == 'Unpaid']
+        my_unpaid_orders = [o for o in all_orders if o.get('table') == my_table and o.get('payment') == 'Unpaid']
         
         if not my_unpaid_orders:
             st.info("ഈ ടേബിളിൽ നിലവിൽ അടക്കാൻ ബാക്കിയുള്ള ബില്ലുകൾ ഒന്നുമില്ല.")
@@ -68,7 +111,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
             st.write("### 🧾 കഴിച്ച വിഭവങ്ങൾ:")
             total_bill = 0
             for o in my_unpaid_orders:
-                for item in o['items']:
+                for item in o.get('items', []):
                     item_total = item['price'] * item['qty']
                     total_bill += item_total
                     st.write(f"🔹 {item['qty']} x {item['name']} (₹{item_total})")
@@ -76,8 +119,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
             st.markdown(f"## 💰 ആകെ അടക്കേണ്ട തുക: ₹{total_bill}")
             st.divider()
             
-            st.subheader("പേയ്മെന്റ് രീതി:")
-            pay_method = st.radio("", ["📱 UPI (GPay, PhonePe, Paytm)", "💵 Pay at Counter (ക്യാഷ്)"])
+            pay_method = st.radio("പേയ്മെന്റ് രീതി:", ["📱 UPI (GPay, PhonePe, Paytm)", "💵 Pay at Counter (ക്യാഷ്)"])
             
             if pay_method == "📱 UPI (GPay, PhonePe, Paytm)":
                 upi_link = f"upi://pay?pa=keralacafe@upi&pn=KeralaCafe&am={total_bill}&cu=INR"
@@ -93,9 +135,8 @@ if mode == "📱 കസ്റ്റമർ മെനു":
             
             if st.button(confirm_text, type="primary", use_container_width=True):
                 payment_status = "Cash Pending" if "Counter" in pay_method else "PAID via UPI"
-                for o in st.session_state.orders:
-                    if o['table'] == my_table and o['payment'] == 'Unpaid':
-                        o['payment'] = payment_status
+                for o in my_unpaid_orders:
+                    update_payment(o['id'], payment_status) # ഫയർബേസിൽ പണം അടച്ചതായി മാറ്റുന്നു
                 st.success("✅ പേയ്മെന്റ് വിജയകരം! നന്ദി.")
                 time.sleep(2)
                 st.session_state.show_bill_page = False
@@ -108,78 +149,95 @@ if mode == "📱 കസ്റ്റമർ മെനു":
     else:
         st.title(f"🍽️ Kerala Cafe - Table {st.session_state.my_table}")
         
-        # ടേബിൾ നമ്പർ സൈഡ്ബാറിൽ (ഡെമോ മോഡിൽ മാത്രം കാണിക്കും)
         if role != "customer":
             st.session_state.my_table = st.sidebar.number_input("ടേബിൾ നമ്പർ മാറ്റുക:", min_value=1, value=st.session_state.my_table)
         
-        my_orders = [o for o in st.session_state.orders if o['table'] == st.session_state.my_table and o['payment'] == 'Unpaid']
-        if my_orders:
-            with st.expander("🔔 നിങ്ങളുടെ മുൻപത്തെ ഓർഡറുകൾ (Live)", expanded=True):
-                for order in my_orders:
-                    if order['status'] == 'Pending':
-                        st.warning(f"ഓർഡർ #{order['id']} - ⏳ കിച്ചൺ സ്വീകരിക്കാൻ കാത്തിരിക്കുന്നു...")
-                    elif order['status'] == 'Accepted':
-                        rem_time = int(order['end_time'] - time.time())
-                        if rem_time > 0:
-                            mins, secs = divmod(rem_time, 60)
-                            st.info(f"ഓർഡർ #{order['id']} - 👨‍🍳 തയ്യാറാകുന്നു! ({mins:02d}:{secs:02d} ബാക്കി)")
-                        else:
-                            st.success(f"ഓർഡർ #{order['id']} - ✅ ഭക്ഷണം തയ്യാറാണ്!")
-                if st.button("🔄 സ്റ്റാറ്റസ് റീഫ്രഷ് ചെയ്യുക"):
-                    st.rerun()
-            st.divider()
-
-        for category, items in menu_data.items():
-            if items:
-                st.subheader(f"🍲 {category}")
-                for item in items:
-                    col1, col2, col3, col4 = st.columns([1, 2, 1, 1])
-                    with col1:
-                        if item.get('image'): st.image(item['image'], width=80)
-                        else: st.write("🍽️") 
-                    with col2:
-                        st.write(f"**{item['name']}**")
-                        st.caption(f"₹{item['price']} | ⏱️ {item.get('prep_time', 300)//60} mins")
-                    with col3:
-                        qty = st.number_input("എണ്ണം", min_value=1, value=1, key=f"qty_{item['name']}")
-                    with col4:
-                        if st.button("Add", key=f"add_{item['name']}"):
-                            st.session_state.cart[item['name']] = {
-                                "name": item['name'], "price": item['price'], 
-                                "qty": qty, "prep_time": item.get('prep_time', 300)
-                            }
-                            st.toast(f"{qty} {item['name']} കാർട്ടിൽ ചേർത്തു!")
+        my_orders = [o for o in all_orders if o.get('table') == st.session_state.my_table and o.get('payment') == 'Unpaid']
+        
+        # കാർട്ട് വലതുവശത്ത് കാണിക്കാൻ സ്ക്രീനിനെ 2 ആയി തിരിക്കുന്നു (70% മെനു, 30% കാർട്ട്)
+        menu_col, cart_col = st.columns([7, 3])
+        
+        with menu_col:
+            if my_orders:
+                with st.expander("🔔 നിങ്ങളുടെ മുൻപത്തെ ഓർഡറുകൾ (Live)", expanded=True):
+                    for order in my_orders:
+                        if order['status'] == 'Pending':
+                            st.warning(f"ഓർഡർ #{order['id']} - ⏳ കിച്ചൺ സ്വീകരിക്കാൻ കാത്തിരിക്കുന്നു...")
+                        elif order['status'] == 'Accepted':
+                            rem_time = int(order['end_time'] - time.time())
+                            if rem_time > 0:
+                                mins, secs = divmod(rem_time, 60)
+                                st.info(f"ഓർഡർ #{order['id']} - 👨‍🍳 തയ്യാറാകുന്നു! ({mins:02d}:{secs:02d} ബാക്കി)")
+                            else:
+                                st.success(f"ഓർഡർ #{order['id']} - ✅ ഭക്ഷണം തയ്യാറാണ്!")
+                    if st.button("🔄 സ്റ്റാറ്റസ് റീഫ്രഷ് ചെയ്യുക"):
+                        st.rerun()
                 st.divider()
 
-        # ബോട്ടം കാർട്ട് സെക്ഷൻ (സൈഡ്ബാർ ഇല്ലാത്തതുകൊണ്ട് താഴെ നൽകുന്നു)
-        if st.session_state.cart:
-            st.markdown("---")
-            st.subheader("🛒 പുതിയ ഓർഡർ (Cart)")
-            total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
-            for item_name, data in st.session_state.cart.items():
-                st.write(f"- {data['qty']} x {data['name']}")
+            for category, items in menu_data.items():
+                if items:
+                    st.subheader(f"🍲 {category}")
+                    for item in items:
+                        c1, c2, c3, c4 = st.columns([1, 2, 1, 1])
+                        with c1:
+                            if item.get('image'): st.image(item['image'], width=80)
+                            else: st.write("🍽️") 
+                        with c2:
+                            st.write(f"**{item['name']}**")
+                            st.caption(f"₹{item['price']} | ⏱️ {item.get('prep_time', 300)//60} mins")
+                        with c3:
+                            qty = st.number_input("എണ്ണം", min_value=1, value=1, key=f"qty_{item['name']}")
+                        with c4:
+                            if st.button("Add", key=f"add_{item['name']}"):
+                                st.session_state.cart[item['name']] = {
+                                    "name": item['name'], "price": item['price'], 
+                                    "qty": qty, "prep_time": item.get('prep_time', 300)
+                                }
+                                st.toast(f"{qty} {item['name']} കാർട്ടിൽ ചേർത്തു!")
+                    st.divider()
+
+        # വലതുവശത്തെ കോളം (Cart Section)
+        with cart_col:
+            st.markdown("""
+            <div style='background-color:#f8f9fa; padding:15px; border-radius:10px; border: 1px solid #ddd;'>
+            <h3 style='text-align:center; color:#333;'>🛒 Cart</h3>
+            """, unsafe_allow_html=True)
             
-            if st.button("👨‍🍳 Send Order to Kitchen", type="primary", use_container_width=True):
-                max_time = max([i['prep_time'] for i in st.session_state.cart.values()])
-                new_order = {
-                    "id": int(time.time()) % 10000, 
-                    "table": st.session_state.my_table,
-                    "status": "Pending",
-                    "items": list(st.session_state.cart.values()),
-                    "suggested_time": max_time,
-                    "end_time": 0,
-                    "total_bill": total,
-                    "payment": "Unpaid" 
-                }
-                st.session_state.orders.append(new_order)
-                st.session_state.cart = {} 
-                st.success("✅ ഓർഡർ കിച്ചണിലേക്ക് അയച്ചു!")
-                st.rerun()
+            if not st.session_state.cart:
+                st.write("കാർട്ട് കാലിയാണ്. ഭക്ഷണം തിരഞ്ഞെടുക്കുക.")
+            else:
+                total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
+                for item_name, data in st.session_state.cart.items():
+                    st.write(f"**{data['qty']} x {data['name']}** (₹{data['price'] * data['qty']})")
                 
-        st.markdown("---")
-        if st.button("💳 ബിൽ കാണുക & പണമടക്കുക (Pay Bill)", use_container_width=True):
-            st.session_state.show_bill_page = True
-            st.rerun()
+                st.divider()
+                st.markdown(f"**ആകെ: ₹{total}**")
+                
+                if st.button("👨‍🍳 Send Order", type="primary", use_container_width=True):
+                    max_time = max([i['prep_time'] for i in st.session_state.cart.values()])
+                    order_id = int(time.time()) % 100000
+                    new_order = {
+                        "id": order_id, 
+                        "table": st.session_state.my_table,
+                        "status": "Pending",
+                        "items": list(st.session_state.cart.values()),
+                        "suggested_time": max_time,
+                        "end_time": 0,
+                        "manual_time": 0,
+                        "total_bill": total,
+                        "payment": "Unpaid" 
+                    }
+                    save_order(new_order) # ഫയർബേസിലേക്ക് സേവ് ചെയ്യുന്നു!
+                    st.session_state.cart = {} 
+                    st.success("✅ ഓർഡർ കിച്ചണിലേക്ക് അയച്ചു!")
+                    st.rerun()
+                    
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.write("") # കുറച്ചു ഗ്യാപ്പ്
+            if st.button("💳 ബിൽ പണമടക്കുക (Pay Bill)", use_container_width=True):
+                st.session_state.show_bill_page = True
+                st.rerun()
 
 # ==========================================
 # 2. കിച്ചൺ & ക്യാഷിയർ പാനൽ
@@ -187,29 +245,35 @@ if mode == "📱 കസ്റ്റമർ മെനു":
 elif mode == "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ":
     st.title("👨‍🍳 കിച്ചൺ ലൈവ് ഡാഷ്ബോർഡ്")
     
-    pending_orders = [o for o in st.session_state.orders if o['status'] == 'Pending']
+    # Refresh ബട്ടൺ - ഫയർബേസിൽ നിന്നും പുതിയ ഓർഡറുകൾ എടുക്കാൻ
+    if st.button("🔄 പുതിയ ഓർഡറുകൾ പരിശോധിക്കുക (Refresh)", type="primary"):
+        st.rerun()
+        
+    pending_orders = [o for o in all_orders if o.get('status') == 'Pending']
     
     if not pending_orders:
         st.info("പുതിയ ഓർഡറുകൾ ഒന്നുമില്ല.")
     else:
         for order in pending_orders:
             st.error(f"🚨 ടേബിൾ {order['table']} - പുതിയ ഓർഡർ! (#{order['id']})")
-            for item in order['items']:
+            for item in order.get('items', []):
                 st.write(f"- **{item['qty']} x {item['name']}**")
                 
-            manual_mins = st.number_input("സമയം മാറ്റുക (മിനിറ്റിൽ):", value=order['suggested_time']//60, key=f"time_{order['id']}")
+            manual_mins = st.number_input("സമയം മാറ്റുക (മിനിറ്റിൽ):", value=order.get('suggested_time', 300)//60, key=f"time_{order['id']}")
             
             if st.button("✅ Accept Order", key=f"acc_{order['id']}", type="primary"):
-                order['status'] = 'Accepted'
-                order['end_time'] = time.time() + manual_mins 
+                end_time = time.time() + (manual_mins * 60)
+                update_order_status(order['id'], 'Accepted', end_time, manual_mins)
+                st.toast(f"ഓർഡർ സ്വീകരിച്ചു!")
+                time.sleep(1)
                 st.rerun()
             st.divider()
             
     st.subheader("💰 ക്യാഷ് സ്റ്റാറ്റസ് (ക്യാഷിയർക്ക് വേണ്ടി)")
-    all_unpaid = [o for o in st.session_state.orders if o['payment'] != 'Unpaid']
+    all_unpaid = [o for o in all_orders if o.get('payment') != 'Unpaid']
     if all_unpaid:
         for o in all_unpaid[-5:]: 
-            if "PAID" in o['payment']:
+            if "PAID" in o.get('payment', ''):
                 st.success(f"ടേബിൾ {o['table']}: {o['payment']} (₹{o['total_bill']})")
             else:
                 st.warning(f"ടേബിൾ {o['table']}: {o['payment']} (₹{o['total_bill']})")
@@ -217,12 +281,11 @@ elif mode == "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ":
         st.write("പുതിയ പേയ്മെന്റുകൾ നടന്നിട്ടില്ല.")
 
 # ==========================================
-# 3. അഡ്മിൻ പാനൽ (ADMIN PANEL & QR GENERATOR)
+# 3. അഡ്മിൻ പാനൽ (ADMIN PANEL)
 # ==========================================
 elif mode == "⚙️ അഡ്മിൻ പാനൽ":
     st.title("⚙️ ഹോട്ടൽ അഡ്മിൻ ഡാഷ്ബോർഡ്")
     
-    # 1. പുതിയ വിഭവം ചേർക്കാൻ
     with st.expander("➕ പുതിയ വിഭവം ചേർക്കുക"):
         cat_input = st.selectbox("വിഭാഗം", ["പ്രധാന വിഭവങ്ങൾ", "പാനീയങ്ങൾ", "മധുരപലഹാരങ്ങൾ"])
         item_name = st.text_input("പേര്")
@@ -238,30 +301,22 @@ elif mode == "⚙️ അഡ്മിൻ പാനൽ":
                 st.success("ചേർത്തു!")
                 st.rerun()
                 
-    # 2. QR കോഡ് ജനറേറ്റർ (പുതിയത്)
     st.divider()
     st.subheader("🖨️ ടേബിൾ QR കോഡ് നിർമ്മിക്കുക")
-    st.write("ഈ QR കോഡ് സ്കാൻ ചെയ്യുമ്പോൾ കസ്റ്റമർക്ക് മെനു മാത്രമേ കാണാൻ സാധിക്കൂ.")
-    
     t_no = st.number_input("ഏത് ടേബിളിലേക്കാണ് QR വേണ്ടത്?", min_value=1, value=1)
-    
     if st.button("Generate QR Code", type="primary"):
-        # നിങ്ങളുടെ യഥാർത്ഥ ആപ്പ് ലിങ്കിനൊപ്പം role ഉം table ഉം ചേർക്കുന്നു
+        # ഇവിടെ താങ്കളുടെ സ്ട്രീംലിറ്റ് ആപ്പിന്റെ ലിങ്ക് നൽകുക
         app_url = f"https://keralacafe-menu-app.streamlit.app/?role=customer&table={t_no}"
-        
         qr = qrcode.QRCode(box_size=10, border=4)
         qr.add_data(app_url)
         qr.make(fit=True)
         img = qr.make_image(fill_color="black", back_color="white")
-        
         buf = BytesIO()
         img.save(buf, format="PNG")
         byte_im = buf.getvalue()
-        
-        st.image(byte_im, caption=f"Table {t_no} QR Code (Customer Only View)", width=300)
+        st.image(byte_im, width=300)
         st.download_button("📥 ഡൗൺലോഡ് ചെയ്യുക", byte_im, file_name=f"Table_{t_no}_QR.png", mime="image/png")
 
-    # 3. വിഭവങ്ങൾ ഡിലീറ്റ് ചെയ്യാൻ
     st.divider()
     st.subheader("🗑️ നിലവിലെ മെനു")
     for category, items in menu_data.items():

@@ -1,3 +1,4 @@
 
 qrcode
 pillow
+firebase-admin
