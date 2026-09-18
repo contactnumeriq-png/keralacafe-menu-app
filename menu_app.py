@@ -66,6 +66,7 @@ menu_data = load_menu()
 
 if 'cart' not in st.session_state: st.session_state.cart = {} 
 if 'show_bill_page' not in st.session_state: st.session_state.show_bill_page = False
+if 'show_cart_page' not in st.session_state: st.session_state.show_cart_page = False
 if 'my_table' not in st.session_state: st.session_state.my_table = 1 
 
 all_orders = get_orders()
@@ -76,7 +77,31 @@ role = query_params.get("role", "demo")
 if role == "customer":
     mode = "📱 കസ്റ്റമർ മെനു"
     st.session_state.my_table = int(query_params.get("table", 1))
-    st.markdown("""<style>[data-testid="stSidebar"] {display: none;} [data-testid="collapsedControl"] {display: none;} .stButton>button {border-radius: 8px;} </style>""", unsafe_allow_html=True)
+    
+    # മൊബൈലിന് ആവശ്യമായ പ്രത്യേക സ്റ്റൈലുകൾ (Floating Cart ബട്ടൺ ഉൾപ്പെടെ)
+    st.markdown("""
+    <style>
+        [data-testid="stSidebar"] {display: none;} 
+        [data-testid="collapsedControl"] {display: none;} 
+        .stButton>button {border-radius: 8px;} 
+        
+        /* ഫ്ലോട്ടിംഗ് കാർട്ട് ബട്ടൺ സ്റ്റൈൽ */
+        .floating-cart {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            width: 90%;
+            max-width: 400px;
+        }
+        
+        /* ഏറ്റവും താഴെ സ്ക്രോൾ ചെയ്യുമ്പോൾ ബട്ടണിന് പിന്നിൽ ഒളിക്കാതിരിക്കാൻ ഒരു സ്പേസ് */
+        .footer-spacer {
+            height: 100px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 else:
     st.sidebar.title("നിയന്ത്രണ പാനൽ")
     mode = st.sidebar.radio("സ്ക്രീൻ തിരഞ്ഞെടുക്കുക:", ["📱 കസ്റ്റമർ മെനു", "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ", "⚙️ അഡ്മിൻ പാനൽ"])
@@ -86,6 +111,9 @@ else:
 # ==========================================
 if mode == "📱 കസ്റ്റമർ മെനു":
     
+    # ----------------------------------------
+    # A. ബിൽ പേയ്മെന്റ് പേജ്
+    # ----------------------------------------
     if st.session_state.show_bill_page:
         st.title("💳 ബിൽ പേയ്മെന്റ്")
         my_table = st.session_state.my_table
@@ -135,13 +163,57 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                 st.session_state.show_bill_page = False
                 st.rerun()
 
+    # ----------------------------------------
+    # B. കാർട്ട് പേജ് (പുതിയത്)
+    # ----------------------------------------
+    elif st.session_state.show_cart_page:
+        st.title("🛒 നിങ്ങളുടെ കാർട്ട്")
+        
+        if not st.session_state.cart:
+            st.warning("കാർട്ട് കാലിയാണ്!")
+        else:
+            total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
+            for item_name, data in st.session_state.cart.items():
+                st.write(f"**{data['qty']} x {data['name']}** (₹{data['price'] * data['qty']})")
+            
+            st.divider()
+            st.markdown(f"### ആകെ അടക്കേണ്ടത്: ₹{total}")
+            
+            if st.button("👨‍🍳 Send Order to Kitchen", type="primary", use_container_width=True):
+                max_time = max([i['prep_time'] for i in st.session_state.cart.values()])
+                order_id = int(time.time()) % 100000
+                new_order = {
+                    "id": order_id, 
+                    "table": st.session_state.my_table,
+                    "status": "Pending",
+                    "items": list(st.session_state.cart.values()),
+                    "suggested_time": max_time,
+                    "end_time": 0,
+                    "manual_time": 0,
+                    "total_bill": total,
+                    "payment": "Unpaid" 
+                }
+                save_order(new_order)
+                st.session_state.cart = {} 
+                st.success("✅ ഓർഡർ കിച്ചണിലേക്ക് അയച്ചു!")
+                time.sleep(1.5)
+                st.session_state.show_cart_page = False
+                st.rerun()
+                
+        if st.button("← മെനുവിലേക്ക് മടങ്ങുക", use_container_width=True):
+            st.session_state.show_cart_page = False
+            st.rerun()
+
+    # ----------------------------------------
+    # C. മെയിൻ മെനു പേജ്
+    # ----------------------------------------
     else:
         st.markdown(f"<h2 style='text-align: center;'>🍽️ Table {st.session_state.my_table}</h2>", unsafe_allow_html=True)
         
         if role != "customer":
             st.session_state.my_table = st.sidebar.number_input("ടേബിൾ നമ്പർ മാറ്റുക:", min_value=1, value=st.session_state.my_table)
         
-        # 1. ലൈവ് ഓർഡർ സ്റ്റാറ്റസ്
+        # ലൈവ് ഓർഡർ സ്റ്റാറ്റസ്
         my_orders = [o for o in all_orders if o.get('table') == st.session_state.my_table and o.get('payment') == 'Unpaid']
         if my_orders:
             with st.expander("🔔 ഓർഡർ സ്റ്റാറ്റസ് (Live)", expanded=True):
@@ -157,49 +229,15 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                             st.success(f"#{order['id']} - ✅ ഭക്ഷണം തയ്യാറാണ്!")
                 if st.button("🔄 റീഫ്രഷ് ചെയ്യുക", use_container_width=True):
                     st.rerun()
+            st.divider()
 
-        # 2. സ്മാർട്ട് കാർട്ട് (ഏറ്റവും മുകളിൽ)
-        cart_items = sum(d['qty'] for d in st.session_state.cart.values())
-        cart_title = f"🛒 നിങ്ങളുടെ കാർട്ട് ({cart_items} items)" if cart_items > 0 else "🛒 കാർട്ട് കാലിയാണ്"
-        
-        with st.expander(cart_title, expanded=(cart_items > 0)):
-            if not st.session_state.cart:
-                st.write("താഴെ നിന്നും ഭക്ഷണം തിരഞ്ഞെടുക്കുക.")
-            else:
-                total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
-                for item_name, data in st.session_state.cart.items():
-                    st.write(f"**{data['qty']} x {data['name']}** (₹{data['price'] * data['qty']})")
-                
-                st.markdown(f"### ആകെ: ₹{total}")
-                
-                if st.button("👨‍🍳 Send Order to Kitchen", type="primary", use_container_width=True):
-                    max_time = max([i['prep_time'] for i in st.session_state.cart.values()])
-                    order_id = int(time.time()) % 100000
-                    new_order = {
-                        "id": order_id, 
-                        "table": st.session_state.my_table,
-                        "status": "Pending",
-                        "items": list(st.session_state.cart.values()),
-                        "suggested_time": max_time,
-                        "end_time": 0,
-                        "manual_time": 0,
-                        "total_bill": total,
-                        "payment": "Unpaid" 
-                    }
-                    save_order(new_order)
-                    st.session_state.cart = {} 
-                    st.success("✅ ഓർഡർ കിച്ചണിലേക്ക് അയച്ചു!")
-                    st.rerun()
-
-        st.divider()
-
-        # 3. വിഭവങ്ങൾ (Mobile Optimized App-Style Cards)
+        # വിഭവങ്ങൾ (Mobile Optimized App-Style Cards)
         for category, items in menu_data.items():
             if items:
                 st.markdown(f"#### {category}")
                 for item in items:
-                    with st.container(border=True): # മൊബൈൽ ആപ്പിലെ പോലെ ബോക്സ്
-                        col1, col2 = st.columns([3, 2]) # വലതുവശത്ത് ഫോട്ടോ, ഇടതുവശത്ത് വിവരങ്ങൾ
+                    with st.container(border=True): 
+                        col1, col2 = st.columns([3, 2]) 
                         
                         with col1:
                             st.markdown(f"**{item['name']}**")
@@ -214,18 +252,33 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                                         "name": item['name'], "price": item['price'], 
                                         "qty": qty, "prep_time": item.get('prep_time', 300)
                                     }
-                                    st.rerun() # കാർട്ട് അപ്ഡേറ്റ് ആകാൻ അപ്പോൾ തന്നെ റീഫ്രഷ് ചെയ്യുന്നു
+                                    st.toast(f"{qty} {item['name']} ചേർത്തു!")
+                                    st.rerun() 
                                     
                         with col2:
                             if item.get('image'): st.image(item['image'], use_container_width=True)
                             else: st.write("🍽️") 
 
-        # 4. ബിൽ പേയ്മെന്റ് ബട്ടൺ (ഏറ്റവും താഴെ)
         st.write("")
         st.write("")
-        if st.button("💳 ബിൽ പണമടക്കുക (Pay Bill)", use_container_width=True, type="primary"):
+        if st.button("💳 ബിൽ പണമടക്കുക (Pay Bill)", use_container_width=True):
             st.session_state.show_bill_page = True
             st.rerun()
+
+        # ഏറ്റവും താഴെ സ്ക്രോൾ ചെയ്യുമ്പോൾ ഫ്ലോട്ടിംഗ് ബട്ടണിന് പിന്നിൽ കണ്ടന്റ് പോകാതിരിക്കാൻ
+        st.markdown("<div class='footer-spacer'></div>", unsafe_allow_html=True)
+
+        # ഫ്ലോട്ടിംഗ് കാർട്ട് ബട്ടൺ (Floating Action Button)
+        if st.session_state.cart:
+            cart_items = sum(d['qty'] for d in st.session_state.cart.values())
+            cart_total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
+            
+            st.markdown("<div class='floating-cart'>", unsafe_allow_html=True)
+            if st.button(f"🛒 View Cart ({cart_items} items) - ₹{cart_total}", type="primary", use_container_width=True):
+                st.session_state.show_cart_page = True
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ==========================================
 # 2. കിച്ചൺ & ക്യാഷിയർ പാനൽ
