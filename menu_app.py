@@ -10,34 +10,29 @@ from firebase_admin import credentials, db
 st.set_page_config(page_title="Smart QR Menu", page_icon="🍔", layout="wide")
 
 # ==========================================
-# ഫയർബേസ് കണക്ഷൻ (Firebase Setup)
+# ഫയർബേസ് കണക്ഷൻ (Streamlit Secrets വഴി)
 # ==========================================
-# ഇവിടെ താങ്കളുടെ ഡാറ്റാബേസ് ലിങ്ക് നൽകുക (ഉദാ: "https://keralacafe-menu-1234.asia-southeast1.firebasedatabase.app/")
-DATABASE_URL = "https://keralacafe-menu-default-rtdb.asia-southeast1.firebasedatabase.app/" 
+DATABASE_URL = "https://keralacafe-menu-default-rtdb.asia-southeast1.firebasedatabase.app/" # താങ്കളുടെ ലിങ്ക് ഇവിടെ നൽകുക
 
 if not firebase_admin._apps:
-    # നമ്മൾ ഫോൾഡറിൽ വെച്ച firebase_key.json ഫയൽ ഉപയോഗിക്കുന്നു
-    cred = credentials.Certificate("firebase_key.json")
+    # സ്ട്രീംലിറ്റ് സീക്രട്ടിൽ നിന്നും പാസ്‌വേഡ് എടുക്കുന്നു (സുരക്ഷിതമായ രീതി)
+    key_dict = json.loads(st.secrets["firebase_secret"])
+    cred = credentials.Certificate(key_dict)
     firebase_admin.initialize_app(cred, {
         'databaseURL': DATABASE_URL
     })
 
-# ഫയർബേസിൽ നിന്നും ഓർഡറുകൾ എടുക്കാനുള്ള ഫംഗ്ഷൻ
 def get_orders():
     orders_ref = db.reference('orders')
     data = orders_ref.get()
     if data:
-        # ഫയർബേസിലെ ഡിക്ഷ്ണറിയെ ലിസ്റ്റ് ആക്കി മാറ്റുന്നു
         return [val for key, val in data.items()]
     return []
 
-# പുതിയ ഓർഡർ ഫയർബേസിലേക്ക് സേവ് ചെയ്യാനുള്ള ഫംഗ്ഷൻ
 def save_order(order_data):
     orders_ref = db.reference('orders')
-    # ഓർഡർ ഐഡി വെച്ച് സേവ് ചെയ്യുന്നു
     orders_ref.child(str(order_data['id'])).set(order_data)
 
-# ഓർഡർ സ്റ്റാറ്റസ് മാറ്റാൻ (കിച്ചണിൽ നിന്നും Accept ചെയ്യുമ്പോൾ)
 def update_order_status(order_id, status, end_time, manual_time):
     order_ref = db.reference(f'orders/{order_id}')
     order_ref.update({
@@ -46,11 +41,9 @@ def update_order_status(order_id, status, end_time, manual_time):
         'manual_time': manual_time
     })
 
-# പേയ്മെന്റ് അപ്ഡേറ്റ് ചെയ്യാൻ
 def update_payment(order_id, payment_status):
     order_ref = db.reference(f'orders/{order_id}')
     order_ref.update({'payment': payment_status})
-
 
 MENU_FILE = "menu_data.json"
 
@@ -78,7 +71,6 @@ if 'cart' not in st.session_state: st.session_state.cart = {}
 if 'show_bill_page' not in st.session_state: st.session_state.show_bill_page = False
 if 'my_table' not in st.session_state: st.session_state.my_table = 1 
 
-# ഫയർബേസിൽ നിന്നും എപ്പോഴും പുതിയ ഓർഡറുകൾ എടുക്കുന്നു
 all_orders = get_orders()
 
 query_params = st.query_params
@@ -136,7 +128,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
             if st.button(confirm_text, type="primary", use_container_width=True):
                 payment_status = "Cash Pending" if "Counter" in pay_method else "PAID via UPI"
                 for o in my_unpaid_orders:
-                    update_payment(o['id'], payment_status) # ഫയർബേസിൽ പണം അടച്ചതായി മാറ്റുന്നു
+                    update_payment(o['id'], payment_status)
                 st.success("✅ പേയ്മെന്റ് വിജയകരം! നന്ദി.")
                 time.sleep(2)
                 st.session_state.show_bill_page = False
@@ -154,7 +146,6 @@ if mode == "📱 കസ്റ്റമർ മെനു":
         
         my_orders = [o for o in all_orders if o.get('table') == st.session_state.my_table and o.get('payment') == 'Unpaid']
         
-        # കാർട്ട് വലതുവശത്ത് കാണിക്കാൻ സ്ക്രീനിനെ 2 ആയി തിരിക്കുന്നു (70% മെനു, 30% കാർട്ട്)
         menu_col, cart_col = st.columns([7, 3])
         
         with menu_col:
@@ -196,7 +187,6 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                                 st.toast(f"{qty} {item['name']} കാർട്ടിൽ ചേർത്തു!")
                     st.divider()
 
-        # വലതുവശത്തെ കോളം (Cart Section)
         with cart_col:
             st.markdown("""
             <div style='background-color:#f8f9fa; padding:15px; border-radius:10px; border: 1px solid #ddd;'>
@@ -227,14 +217,14 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                         "total_bill": total,
                         "payment": "Unpaid" 
                     }
-                    save_order(new_order) # ഫയർബേസിലേക്ക് സേവ് ചെയ്യുന്നു!
+                    save_order(new_order)
                     st.session_state.cart = {} 
                     st.success("✅ ഓർഡർ കിച്ചണിലേക്ക് അയച്ചു!")
                     st.rerun()
                     
             st.markdown("</div>", unsafe_allow_html=True)
             
-            st.write("") # കുറച്ചു ഗ്യാപ്പ്
+            st.write("") 
             if st.button("💳 ബിൽ പണമടക്കുക (Pay Bill)", use_container_width=True):
                 st.session_state.show_bill_page = True
                 st.rerun()
@@ -245,7 +235,6 @@ if mode == "📱 കസ്റ്റമർ മെനു":
 elif mode == "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ":
     st.title("👨‍🍳 കിച്ചൺ ലൈവ് ഡാഷ്ബോർഡ്")
     
-    # Refresh ബട്ടൺ - ഫയർബേസിൽ നിന്നും പുതിയ ഓർഡറുകൾ എടുക്കാൻ
     if st.button("🔄 പുതിയ ഓർഡറുകൾ പരിശോധിക്കുക (Refresh)", type="primary"):
         st.rerun()
         
@@ -305,7 +294,6 @@ elif mode == "⚙️ അഡ്മിൻ പാനൽ":
     st.subheader("🖨️ ടേബിൾ QR കോഡ് നിർമ്മിക്കുക")
     t_no = st.number_input("ഏത് ടേബിളിലേക്കാണ് QR വേണ്ടത്?", min_value=1, value=1)
     if st.button("Generate QR Code", type="primary"):
-        # ഇവിടെ താങ്കളുടെ സ്ട്രീംലിറ്റ് ആപ്പിന്റെ ലിങ്ക് നൽകുക
         app_url = f"https://keralacafe-menu-app.streamlit.app/?role=customer&table={t_no}"
         qr = qrcode.QRCode(box_size=10, border=4)
         qr.add_data(app_url)
