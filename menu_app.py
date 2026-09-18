@@ -217,7 +217,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                                     st.rerun() # കാർട്ട് അപ്ഡേറ്റ് ആകാൻ അപ്പോൾ തന്നെ റീഫ്രഷ് ചെയ്യുന്നു
                                     
                         with col2:
-                            if item.get('image'): st.image(item['image'], use_column_width=True)
+                            if item.get('image'): st.image(item['image'], use_container_width=True)
                             else: st.write("🍽️") 
 
         # 4. ബിൽ പേയ്മെന്റ് ബട്ടൺ (ഏറ്റവും താഴെ)
