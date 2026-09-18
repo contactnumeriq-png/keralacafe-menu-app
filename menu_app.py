@@ -77,31 +77,6 @@ role = query_params.get("role", "demo")
 if role == "customer":
     mode = "📱 കസ്റ്റമർ മെനു"
     st.session_state.my_table = int(query_params.get("table", 1))
-    
-    # മൊബൈലിന് ആവശ്യമായ പ്രത്യേക സ്റ്റൈലുകൾ (Floating Cart ബട്ടൺ ഉൾപ്പെടെ)
-    st.markdown("""
-    <style>
-        [data-testid="stSidebar"] {display: none;} 
-        [data-testid="collapsedControl"] {display: none;} 
-        .stButton>button {border-radius: 8px;} 
-        
-        /* ഫ്ലോട്ടിംഗ് കാർട്ട് ബട്ടൺ സ്റ്റൈൽ */
-        .floating-cart {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 9999;
-            width: 90%;
-            max-width: 400px;
-        }
-        
-        /* ഏറ്റവും താഴെ സ്ക്രോൾ ചെയ്യുമ്പോൾ ബട്ടണിന് പിന്നിൽ ഒളിക്കാതിരിക്കാൻ ഒരു സ്പേസ് */
-        .footer-spacer {
-            height: 100px;
-        }
-    </style>
-    """, unsafe_allow_html=True)
 else:
     st.sidebar.title("നിയന്ത്രണ പാനൽ")
     mode = st.sidebar.radio("സ്ക്രീൻ തിരഞ്ഞെടുക്കുക:", ["📱 കസ്റ്റമർ മെനു", "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ", "⚙️ അഡ്മിൻ പാനൽ"])
@@ -110,6 +85,40 @@ else:
 # 1. കസ്റ്റമർ മെനു (MOBILE OPTIMIZED VIEW)
 # ==========================================
 if mode == "📱 കസ്റ്റമർ മെനു":
+    
+    # മൊബൈലിന് ആവശ്യമായ മാജിക് സ്റ്റൈലുകൾ (Floating Cart & Image Crop)
+    st.markdown("""
+    <style>
+        [data-testid="stSidebar"] {display: none;} 
+        [data-testid="collapsedControl"] {display: none;} 
+        
+        /* ഫ്ലോട്ടിംഗ് കാർട്ട് ബട്ടൺ ഡിസൈൻ (Primary Button മാത്രം) */
+        button[data-testid="baseButton-primary"] {
+            position: fixed !important;
+            bottom: 25px !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            width: 90% !important;
+            max-width: 400px !important;
+            z-index: 9999 !important;
+            box-shadow: 0px 8px 20px rgba(0,0,0,0.5) !important;
+            border-radius: 30px !important;
+            padding: 12px !important;
+        }
+        
+        button[data-testid="baseButton-primary"] p {
+            font-size: 18px !important;
+            font-weight: bold !important;
+        }
+
+        /* എല്ലാ ഭക്ഷണ ഫോട്ടോകളും ഒരേ വലിപ്പത്തിൽ ആക്കാൻ */
+        [data-testid="stImage"] img {
+            max-height: 150px !important;
+            object-fit: cover !important;
+            border-radius: 12px !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
     
     # ----------------------------------------
     # A. ബിൽ പേയ്മെന്റ് പേജ്
@@ -121,7 +130,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
         
         if not my_unpaid_orders:
             st.info("ഈ ടേബിളിൽ നിലവിൽ അടക്കാൻ ബാക്കിയുള്ള ബില്ലുകൾ ഒന്നുമില്ല.")
-            if st.button("← മെനുവിലേക്ക് മടങ്ങുക"):
+            if st.button("← മെനുവിലേക്ക് മടങ്ങുക", use_container_width=True):
                 st.session_state.show_bill_page = False
                 st.rerun()
         else:
@@ -146,9 +155,11 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                 img = qr.make_image(fill_color="black", back_color="white")
                 buf = BytesIO()
                 img.save(buf, format="PNG")
-                st.image(buf.getvalue(), width=200)
+                st.image(buf.getvalue(), width=150)
                 
-            confirm_text = "Pay at Counter & Close Bill" if "Counter" in pay_method else f"Pay ₹{total_bill} & Close Bill"
+            confirm_text = "Pay at Counter & Close" if "Counter" in pay_method else f"Pay ₹{total_bill} via UPI"
+            
+            st.markdown("<div style='height: 80px;'></div>", unsafe_allow_html=True) # Spacer
             
             if st.button(confirm_text, type="primary", use_container_width=True):
                 payment_status = "Cash Pending" if "Counter" in pay_method else "PAID via UPI"
@@ -159,12 +170,12 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                 st.session_state.show_bill_page = False
                 st.rerun()
                 
-            if st.button("← കൂടുതൽ ഓർഡർ ചെയ്യാൻ മടങ്ങുക"):
+            if st.button("← കൂടുതൽ ഓർഡർ ചെയ്യാൻ മടങ്ങുക", use_container_width=True):
                 st.session_state.show_bill_page = False
                 st.rerun()
 
     # ----------------------------------------
-    # B. കാർട്ട് പേജ് (പുതിയത്)
+    # B. കാർട്ട് പേജ്
     # ----------------------------------------
     elif st.session_state.show_cart_page:
         st.title("🛒 നിങ്ങളുടെ കാർട്ട്")
@@ -178,6 +189,8 @@ if mode == "📱 കസ്റ്റമർ മെനു":
             
             st.divider()
             st.markdown(f"### ആകെ അടക്കേണ്ടത്: ₹{total}")
+            
+            st.markdown("<div style='height: 80px;'></div>", unsafe_allow_html=True) # Spacer
             
             if st.button("👨‍🍳 Send Order to Kitchen", type="primary", use_container_width=True):
                 max_time = max([i['prep_time'] for i in st.session_state.cart.values()])
@@ -247,6 +260,7 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                             with qty_col:
                                 qty = st.number_input("Qty", min_value=1, value=1, key=f"qty_{item['name']}", label_visibility="collapsed")
                             with add_col:
+                                # ഇത് Secondary ബട്ടൺ ആണ് (അതുകൊണ്ട് താഴെ ഒട്ടിനിൽക്കില്ല)
                                 if st.button("Add", key=f"add_{item['name']}", type="secondary", use_container_width=True):
                                     st.session_state.cart[item['name']] = {
                                         "name": item['name'], "price": item['price'], 
@@ -265,19 +279,17 @@ if mode == "📱 കസ്റ്റമർ മെനു":
             st.session_state.show_bill_page = True
             st.rerun()
 
-        # ഏറ്റവും താഴെ സ്ക്രോൾ ചെയ്യുമ്പോൾ ഫ്ലോട്ടിംഗ് ബട്ടണിന് പിന്നിൽ കണ്ടന്റ് പോകാതിരിക്കാൻ
-        st.markdown("<div class='footer-spacer'></div>", unsafe_allow_html=True)
+        # ഫ്ലോട്ടിംഗ് ബട്ടണിന് പിന്നിൽ കണ്ടന്റ് പോകാതിരിക്കാൻ
+        st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
 
-        # ഫ്ലോട്ടിംഗ് കാർട്ട് ബട്ടൺ (Floating Action Button)
+        # ഫ്ലോട്ടിംഗ് കാർട്ട് ബട്ടൺ (ഇത് Primary ബട്ടൺ ആയതുകൊണ്ട് എപ്പോഴും താഴെ ഒട്ടിനിൽക്കും)
         if st.session_state.cart:
             cart_items = sum(d['qty'] for d in st.session_state.cart.values())
             cart_total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
             
-            st.markdown("<div class='floating-cart'>", unsafe_allow_html=True)
-            if st.button(f"🛒 View Cart ({cart_items} items) - ₹{cart_total}", type="primary", use_container_width=True):
+            if st.button(f"🛒 View Cart ({cart_items} Items) - ₹{cart_total}", type="primary", use_container_width=True):
                 st.session_state.show_cart_page = True
                 st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ==========================================
