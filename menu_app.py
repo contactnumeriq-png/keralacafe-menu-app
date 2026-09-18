@@ -7,15 +7,16 @@ import time
 import firebase_admin
 from firebase_admin import credentials, db
 
-st.set_page_config(page_title="Smart QR Menu", page_icon="🍔", layout="wide")
+st.set_page_config(page_title="Kerala Cafe Menu", page_icon="🍔", layout="centered")
 
 # ==========================================
-# ഫയർബേസ് കണക്ഷൻ (Streamlit Secrets വഴി)
+# ഫയർബേസ് കണക്ഷൻ 
 # ==========================================
-DATABASE_URL = "https://keralacafe-menu-default-rtdb.asia-southeast1.firebasedatabase.app/" # താങ്കളുടെ ലിങ്ക് ഇവിടെ നൽകുക
+DATABASE_URL = "https://keralacafe-menu-default-rtdb.asia-southeast1.firebasedatabase.app/" # താങ്കളുടെ ഡാറ്റാബേസ് ലിങ്ക് ഇവിടെ നൽകുക
 
-if not firebase_admin._apps:
-    # സ്ട്രീംലിറ്റ് സീക്രട്ടിൽ നിന്നും പാസ്‌വേഡ് എടുക്കുന്നു (സുരക്ഷിതമായ രീതി)
+try:
+    firebase_app = firebase_admin.get_app()
+except ValueError:
     key_dict = json.loads(st.secrets["firebase_secret"])
     cred = credentials.Certificate(key_dict)
     firebase_admin.initialize_app(cred, {
@@ -35,11 +36,7 @@ def save_order(order_data):
 
 def update_order_status(order_id, status, end_time, manual_time):
     order_ref = db.reference(f'orders/{order_id}')
-    order_ref.update({
-        'status': status,
-        'end_time': end_time,
-        'manual_time': manual_time
-    })
+    order_ref.update({'status': status, 'end_time': end_time, 'manual_time': manual_time})
 
 def update_payment(order_id, payment_status):
     order_ref = db.reference(f'orders/{order_id}')
@@ -79,13 +76,13 @@ role = query_params.get("role", "demo")
 if role == "customer":
     mode = "📱 കസ്റ്റമർ മെനു"
     st.session_state.my_table = int(query_params.get("table", 1))
-    st.markdown("""<style>[data-testid="stSidebar"] {display: none;} [data-testid="collapsedControl"] {display: none;}</style>""", unsafe_allow_html=True)
+    st.markdown("""<style>[data-testid="stSidebar"] {display: none;} [data-testid="collapsedControl"] {display: none;} .stButton>button {border-radius: 8px;} </style>""", unsafe_allow_html=True)
 else:
-    st.sidebar.title("നിയന്ത്രണ പാനൽ (Demo Mode)")
+    st.sidebar.title("നിയന്ത്രണ പാനൽ")
     mode = st.sidebar.radio("സ്ക്രീൻ തിരഞ്ഞെടുക്കുക:", ["📱 കസ്റ്റമർ മെനു", "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ", "⚙️ അഡ്മിൻ പാനൽ"])
 
 # ==========================================
-# 1. കസ്റ്റമർ മെനു (CUSTOMER VIEW)
+# 1. കസ്റ്റമർ മെനു (MOBILE OPTIMIZED VIEW)
 # ==========================================
 if mode == "📱 കസ്റ്റമർ മെനു":
     
@@ -108,12 +105,12 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                     total_bill += item_total
                     st.write(f"🔹 {item['qty']} x {item['name']} (₹{item_total})")
                     
-            st.markdown(f"## 💰 ആകെ അടക്കേണ്ട തുക: ₹{total_bill}")
+            st.markdown(f"## 💰 ആകെ: ₹{total_bill}")
             st.divider()
             
-            pay_method = st.radio("പേയ്മെന്റ് രീതി:", ["📱 UPI (GPay, PhonePe, Paytm)", "💵 Pay at Counter (ക്യാഷ്)"])
+            pay_method = st.radio("പേയ്മെന്റ് രീതി:", ["📱 UPI (GPay, PhonePe)", "💵 Pay at Counter (ക്യാഷ്)"])
             
-            if pay_method == "📱 UPI (GPay, PhonePe, Paytm)":
+            if "UPI" in pay_method:
                 upi_link = f"upi://pay?pa=keralacafe@upi&pn=KeralaCafe&am={total_bill}&cu=INR"
                 qr = qrcode.QRCode(box_size=6, border=2)
                 qr.add_data(upi_link)
@@ -139,71 +136,43 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                 st.rerun()
 
     else:
-        st.title(f"🍽️ Kerala Cafe - Table {st.session_state.my_table}")
+        st.markdown(f"<h2 style='text-align: center;'>🍽️ Table {st.session_state.my_table}</h2>", unsafe_allow_html=True)
         
         if role != "customer":
             st.session_state.my_table = st.sidebar.number_input("ടേബിൾ നമ്പർ മാറ്റുക:", min_value=1, value=st.session_state.my_table)
         
+        # 1. ലൈവ് ഓർഡർ സ്റ്റാറ്റസ്
         my_orders = [o for o in all_orders if o.get('table') == st.session_state.my_table and o.get('payment') == 'Unpaid']
-        
-        menu_col, cart_col = st.columns([7, 3])
-        
-        with menu_col:
-            if my_orders:
-                with st.expander("🔔 നിങ്ങളുടെ മുൻപത്തെ ഓർഡറുകൾ (Live)", expanded=True):
-                    for order in my_orders:
-                        if order['status'] == 'Pending':
-                            st.warning(f"ഓർഡർ #{order['id']} - ⏳ കിച്ചൺ സ്വീകരിക്കാൻ കാത്തിരിക്കുന്നു...")
-                        elif order['status'] == 'Accepted':
-                            rem_time = int(order['end_time'] - time.time())
-                            if rem_time > 0:
-                                mins, secs = divmod(rem_time, 60)
-                                st.info(f"ഓർഡർ #{order['id']} - 👨‍🍳 തയ്യാറാകുന്നു! ({mins:02d}:{secs:02d} ബാക്കി)")
-                            else:
-                                st.success(f"ഓർഡർ #{order['id']} - ✅ ഭക്ഷണം തയ്യാറാണ്!")
-                    if st.button("🔄 സ്റ്റാറ്റസ് റീഫ്രഷ് ചെയ്യുക"):
-                        st.rerun()
-                st.divider()
+        if my_orders:
+            with st.expander("🔔 ഓർഡർ സ്റ്റാറ്റസ് (Live)", expanded=True):
+                for order in my_orders:
+                    if order['status'] == 'Pending':
+                        st.warning(f"#{order['id']} - ⏳ കിച്ചൺ കാത്തിരിക്കുന്നു...")
+                    elif order['status'] == 'Accepted':
+                        rem_time = int(order['end_time'] - time.time())
+                        if rem_time > 0:
+                            mins, secs = divmod(rem_time, 60)
+                            st.info(f"#{order['id']} - 👨‍🍳 തയ്യാറാകുന്നു! ({mins:02d}:{secs:02d})")
+                        else:
+                            st.success(f"#{order['id']} - ✅ ഭക്ഷണം തയ്യാറാണ്!")
+                if st.button("🔄 റീഫ്രഷ് ചെയ്യുക", use_container_width=True):
+                    st.rerun()
 
-            for category, items in menu_data.items():
-                if items:
-                    st.subheader(f"🍲 {category}")
-                    for item in items:
-                        c1, c2, c3, c4 = st.columns([1, 2, 1, 1])
-                        with c1:
-                            if item.get('image'): st.image(item['image'], width=80)
-                            else: st.write("🍽️") 
-                        with c2:
-                            st.write(f"**{item['name']}**")
-                            st.caption(f"₹{item['price']} | ⏱️ {item.get('prep_time', 300)//60} mins")
-                        with c3:
-                            qty = st.number_input("എണ്ണം", min_value=1, value=1, key=f"qty_{item['name']}")
-                        with c4:
-                            if st.button("Add", key=f"add_{item['name']}"):
-                                st.session_state.cart[item['name']] = {
-                                    "name": item['name'], "price": item['price'], 
-                                    "qty": qty, "prep_time": item.get('prep_time', 300)
-                                }
-                                st.toast(f"{qty} {item['name']} കാർട്ടിൽ ചേർത്തു!")
-                    st.divider()
-
-        with cart_col:
-            st.markdown("""
-            <div style='background-color:#f8f9fa; padding:15px; border-radius:10px; border: 1px solid #ddd;'>
-            <h3 style='text-align:center; color:#333;'>🛒 Cart</h3>
-            """, unsafe_allow_html=True)
-            
+        # 2. സ്മാർട്ട് കാർട്ട് (ഏറ്റവും മുകളിൽ)
+        cart_items = sum(d['qty'] for d in st.session_state.cart.values())
+        cart_title = f"🛒 നിങ്ങളുടെ കാർട്ട് ({cart_items} items)" if cart_items > 0 else "🛒 കാർട്ട് കാലിയാണ്"
+        
+        with st.expander(cart_title, expanded=(cart_items > 0)):
             if not st.session_state.cart:
-                st.write("കാർട്ട് കാലിയാണ്. ഭക്ഷണം തിരഞ്ഞെടുക്കുക.")
+                st.write("താഴെ നിന്നും ഭക്ഷണം തിരഞ്ഞെടുക്കുക.")
             else:
                 total = sum(d['price'] * d['qty'] for d in st.session_state.cart.values())
                 for item_name, data in st.session_state.cart.items():
                     st.write(f"**{data['qty']} x {data['name']}** (₹{data['price'] * data['qty']})")
                 
-                st.divider()
-                st.markdown(f"**ആകെ: ₹{total}**")
+                st.markdown(f"### ആകെ: ₹{total}")
                 
-                if st.button("👨‍🍳 Send Order", type="primary", use_container_width=True):
+                if st.button("👨‍🍳 Send Order to Kitchen", type="primary", use_container_width=True):
                     max_time = max([i['prep_time'] for i in st.session_state.cart.values()])
                     order_id = int(time.time()) % 100000
                     new_order = {
@@ -221,13 +190,42 @@ if mode == "📱 കസ്റ്റമർ മെനു":
                     st.session_state.cart = {} 
                     st.success("✅ ഓർഡർ കിച്ചണിലേക്ക് അയച്ചു!")
                     st.rerun()
-                    
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            st.write("") 
-            if st.button("💳 ബിൽ പണമടക്കുക (Pay Bill)", use_container_width=True):
-                st.session_state.show_bill_page = True
-                st.rerun()
+
+        st.divider()
+
+        # 3. വിഭവങ്ങൾ (Mobile Optimized App-Style Cards)
+        for category, items in menu_data.items():
+            if items:
+                st.markdown(f"#### {category}")
+                for item in items:
+                    with st.container(border=True): # മൊബൈൽ ആപ്പിലെ പോലെ ബോക്സ്
+                        col1, col2 = st.columns([3, 2]) # വലതുവശത്ത് ഫോട്ടോ, ഇടതുവശത്ത് വിവരങ്ങൾ
+                        
+                        with col1:
+                            st.markdown(f"**{item['name']}**")
+                            st.caption(f"₹{item['price']} | ⏱️ {item.get('prep_time', 300)//60} mins")
+                            
+                            qty_col, add_col = st.columns([1, 1])
+                            with qty_col:
+                                qty = st.number_input("Qty", min_value=1, value=1, key=f"qty_{item['name']}", label_visibility="collapsed")
+                            with add_col:
+                                if st.button("Add", key=f"add_{item['name']}", type="secondary", use_container_width=True):
+                                    st.session_state.cart[item['name']] = {
+                                        "name": item['name'], "price": item['price'], 
+                                        "qty": qty, "prep_time": item.get('prep_time', 300)
+                                    }
+                                    st.rerun() # കാർട്ട് അപ്ഡേറ്റ് ആകാൻ അപ്പോൾ തന്നെ റീഫ്രഷ് ചെയ്യുന്നു
+                                    
+                        with col2:
+                            if item.get('image'): st.image(item['image'], use_column_width=True)
+                            else: st.write("🍽️") 
+
+        # 4. ബിൽ പേയ്മെന്റ് ബട്ടൺ (ഏറ്റവും താഴെ)
+        st.write("")
+        st.write("")
+        if st.button("💳 ബിൽ പണമടക്കുക (Pay Bill)", use_container_width=True, type="primary"):
+            st.session_state.show_bill_page = True
+            st.rerun()
 
 # ==========================================
 # 2. കിച്ചൺ & ക്യാഷിയർ പാനൽ
@@ -248,7 +246,7 @@ elif mode == "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ":
             for item in order.get('items', []):
                 st.write(f"- **{item['qty']} x {item['name']}**")
                 
-            manual_mins = st.number_input("സമയം മാറ്റുക (മിനിറ്റിൽ):", value=order.get('suggested_time', 300)//60, key=f"time_{order['id']}")
+            manual_mins = st.number_input("സമയം (മിനിറ്റിൽ):", value=order.get('suggested_time', 300)//60, key=f"time_{order['id']}")
             
             if st.button("✅ Accept Order", key=f"acc_{order['id']}", type="primary"):
                 end_time = time.time() + (manual_mins * 60)
@@ -270,7 +268,7 @@ elif mode == "👨‍🍳 കിച്ചൺ & ക്യാഷിയർ":
         st.write("പുതിയ പേയ്മെന്റുകൾ നടന്നിട്ടില്ല.")
 
 # ==========================================
-# 3. അഡ്മിൻ പാനൽ (ADMIN PANEL)
+# 3. അഡ്മിൻ പാനൽ
 # ==========================================
 elif mode == "⚙️ അഡ്മിൻ പാനൽ":
     st.title("⚙️ ഹോട്ടൽ അഡ്മിൻ ഡാഷ്ബോർഡ്")
